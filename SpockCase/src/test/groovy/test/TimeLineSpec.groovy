@@ -5,6 +5,8 @@ package test
 import spock.lang.Specification
 
 import java.rmi.activation.ActivationSystem
+import java.text.SimpleDateFormat
+import java.time.chrono.ChronoLocalDateTime
 
 import org.codehaus.groovy.control.customizers.ImportCustomizer.Import
 import org.json.JSONArray
@@ -14,41 +16,100 @@ import groovy.util.logging.Slf4j
 
 class TimeLineSpec extends Specification {
 
-def notSharedField = new TweeterAPI();
- 
+	def "Check text fields of Home timeline API response for last 3 tweets"(){
 
-	def setup(){
-		System.out.println("Setup");
-	}
-// run before every feature method
-	def cleanup() {}        // run after every feature method
-	def setupSpec() {}     // run before the first feature method
-	def cleanupSpec() {}   // run after the last feature method
-	
-	def "Check created time, retweet count and text fields of Home timeline API response "(){
+		//count of statuses for check
+		def countOfStatuses =3;
 
 		setup:
-//		def statusText = "Status " + System.currentTimeMillis();
-		TweeterAPI.sendStatusUpdateRequest(a);
-		
+		ArrayList<String> statusIds = new ArrayList<String>();
+		for (int i =0; i < countOfStatuses; i++) {
+			statusIds.add(new JSONObject(TweeterAPI.sendStatusUpdateRequest(text +" " + i).getBody()).getString("id_str"));
+		}
+
 		when:
 		def response = TweeterAPI.sendHomeTimeLineRequest();
-        JSONArray arr = new JSONArray(response);
-		def time = arr.getJSONObject(0).getString("created_at");
-		def retweet =arr.getJSONObject(0).getString("retweet_count");
-		def text =  arr.getJSONObject(0).getString("text");
+		then:
+		response.getCode()==200;
+
+		JSONArray arr = new JSONArray(response.getBody());
+		for (int i = 0; i < countOfStatuses; i++){
+
+			when:
+			JSONObject lastStatus = arr.getJSONObject(i);
+			def responseText =  lastStatus.getString("text");
+
+			then:
+			responseText == text;
+		}
+
+		cleanup:
+		for (String id : statusIds) {
+			TweeterAPI.sendStatusDestroyRequest(id);
+		}
+
+
+		where:
+		text << ["Ordinary text", "Кириллица"]
+		// Also can be checked:	"i`~!@#^&*(><?/*"
+
+	}
+
+	def "Check created time field of Home timeline API response for the last tweet"(){
+
+		setup:
+		def text ="Check time";
+		def responseBody = new JSONObject(TweeterAPI.sendStatusUpdateRequest(text).getBody());
+		def statusId = responseBody.getString("id_str");
+		def createdTimeUpdateResponse = responseBody.getString("created_at");
+		def currentTime=System.currentTimeMillis();
+
+		when:
+		def response = TweeterAPI.sendHomeTimeLineRequest();
+		JSONArray arr = new JSONArray(response.getBody());
+		JSONObject lastStatus = arr.getJSONObject(0);
+		def createdTimeLineResponse = lastStatus.getString("created_at");
+
+		SimpleDateFormat dateFormat = new SimpleDateFormat("E MMM dd HH:mm:ss Z yyyy");
+		Date date = dateFormat.parse(createdTimeLineResponse);
 
 		then:
-		text == a;
-		
-		
-		where:
-		a << ["Ordinary text"]
-//			"Кириллица",
-//			"sdsd",
-//			"i`~!@#%^&*(><?/*"]
-	
+		response.getCode()==200;
+		createdTimeUpdateResponse==createdTimeLineResponse; //check that create time in update API response is the same as in time line API
+		currentTime - date.getTime() <3600; //check that less ten 1 minute passed after sendingRequst and creation time
 
+		cleanup:
+		TweeterAPI.sendStatusDestroyRequest(lastStatus.getString("id_str"));
+
+	}
+
+
+	def "Check retweet count field of Home timeline API response for last tweet"(){
+
+		setup:
+		def text ="Check retweet count";
+		def statusId = new JSONObject(TweeterAPI.sendStatusUpdateRequest(text).getBody()).getString("id_str");
+
+		when:
+		def response = TweeterAPI.sendHomeTimeLineRequest();
+		JSONArray arr = new JSONArray(response.getBody());
+		def retweetCount  = arr.getJSONObject(0).getString("retweet_count");
+
+		then:
+		response.getCode()==200;
+		retweetCount == "0";
+
+		when:
+		TweeterAPI.sendStatusRetweetRequest(statusId); //do retweet
+		response= TweeterAPI.sendHomeTimeLineRequest(); //get again time line
+		arr = new JSONArray(response.getBody());
+		retweetCount = arr.getJSONObject(0).getString("retweet_count");
+
+		then:
+		retweetCount == "1";
+
+		cleanup:
+		TweeterAPI.sendStatusDestroyRequest(lastStatus.getString("id_str"));
 
 	}
 }
